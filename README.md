@@ -1,28 +1,29 @@
-# 🦠 BioPulse: Measles Outbreak Tracker
+# BioPulse: Measles Outbreak Tracker
 
-> **Real-time measles outbreak monitoring using Google Trends, CDC data, and news sentiment analysis**
+Real-time measles outbreak monitoring system combining Google Trends, CDC data, and news sentiment analysis.
 
 [![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-blue.svg)](https://www.postgresql.org/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.51-red.svg)](https://streamlit.io/)
 
-## 🎯 Overview
+## Overview
 
-BioPulse is an **automated data pipeline** that tracks measles outbreaks by combining:
+BioPulse is an automated data engineering project that monitors measles outbreak signals by integrating multiple data sources:
 
-1. **Google Trends** - Public search interest as a leading indicator
-2. **CDC Data** - Official measles case reports
-3. **News Articles** - Media coverage and sentiment
+**Data Sources:**
+- Google Trends: Public search interest as a leading indicator
+- CDC: Official measles case reports
+- NewsAPI: Media coverage and sentiment analysis
 
-## ✨ Features
+**Key Features:**
+- Automated daily data collection
+- NLP-powered sentiment analysis using TextBlob
+- Risk scoring algorithm (0-100 scale)
+- Interactive Streamlit dashboard
+- PostgreSQL data warehouse
+- Complete logging and monitoring
 
-- ✅ **Automated Data Collection** - 3 scrapers run daily
-- 📊 **Interactive Dashboard** - Real-time visualization with Streamlit
-- 🗄️ **PostgreSQL Storage** - Structured data warehouse
-- 📈 **Time Series Analysis** - Track trends over 90+ days
-- 🔄 **Simple Setup** - No complex orchestration needed!
-
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -47,41 +48,49 @@ cp .env.template .env
 # Start PostgreSQL
 docker-compose up -d
 
-# Run scrapers
-python run_all_scrapers.py
+# Run complete pipeline
+python run_full_pipeline.py
 
 # Launch dashboard
 streamlit run dashboard/app.py
 ```
 
-Visit **http://localhost:8501** 🎉
+Visit http://localhost:8501 to view the dashboard.
 
-## 📊 Data Sources
+## Data Sources
 
-### 1. Google Trends 📈
+### Google Trends
 - Search interest for "measles", "mmr vaccine", "measles outbreak"
-- Daily updates, 90-day history
-- No API key needed
+- 90-day rolling history
+- No API key required
 
-### 2. CDC Cases 🏥
-- Official measles case counts
+### CDC Cases
+- Official measles case counts from CDC website
 - Source: [CDC Measles Data](https://www.cdc.gov/measles/)
-- Web scraping
+- Automated web scraping
 
-### 3. News Articles 📰
+### News Articles
 - Measles-related news from 30+ sources
-- Last 7 days coverage
-- Requires NewsAPI key
+- 7-day lookback window
+- Requires free NewsAPI key
 
-## 🛠️ Tech Stack
+## Architecture
 
-- **Data Collection:** Python, requests, BeautifulSoup, pytrends
-- **Database:** PostgreSQL 15
-- **Orchestration:** Cron (simple!)
-- **Visualization:** Streamlit, Plotly
-- **Infrastructure:** Docker
+**Data Pipeline:**
+1. Data Collection: Python scrapers (Google Trends, CDC, NewsAPI)
+2. Storage: PostgreSQL database
+3. Analysis: TextBlob sentiment analysis + custom risk scoring
+4. Visualization: Interactive Streamlit dashboard
 
-## 📁 Project Structure
+**Tech Stack:**
+- Language: Python 3.11
+- Database: PostgreSQL 15
+- NLP: TextBlob
+- Dashboard: Streamlit + Plotly
+- Orchestration: Cron jobs
+- Infrastructure: Docker
+
+## Project Structure
 
 ```
 measles-biopulse/
@@ -90,35 +99,99 @@ measles-biopulse/
 ├── run_google_trends.py        # Google Trends scraper
 ├── run_cdc_scraper.py          # CDC scraper
 ├── run_newsapi_scraper.py      # NewsAPI scraper
-├── run_all_scrapers.py         # Run all scrapers
+├── run_all_scrapers.py         # Master script
+├── run_full_pipeline.py        # Complete pipeline (collection + analysis)
+├── sentiment_analysis.py       # NLP sentiment analysis
+├── calculate_risk_score.py     # Risk scoring algorithm
+├── run_daily_scrapers.sh       # Cron-friendly wrapper script
 ├── init_db.sql                 # Database schema
 ├── docker-compose.yaml         # PostgreSQL service
-└── requirements.txt            # Python dependencies
+├── requirements.txt            # Python dependencies
+└── logs/                       # Daily execution logs
 ```
 
-## ⏰ Automation
+## Risk Scoring Algorithm
 
-Set up daily data collection:
+The risk score (0-100) combines three weighted components:
+
+**Search Interest (40 points):**
+- Monitors Google Trends for measles-related search spikes
+- Compares recent 7-day average vs. 30-day baseline
+- Higher scores indicate increased public concern
+
+**Case Growth (30 points):**
+- Tracks CDC reported case counts
+- Compares latest reports vs. historical average
+- Accounts for absolute case thresholds
+
+**News Sentiment (30 points):**
+- Analyzes sentiment of recent news articles using TextBlob
+- Negative sentiment correlates with higher risk
+- Weighted by article volume and recency
+
+**Risk Levels:**
+- LOW (0-39): Normal monitoring
+- MEDIUM (40-69): Increased attention recommended
+- HIGH (70-100): Potential outbreak conditions
+
+## Automation
+
+Set up daily automated execution:
 
 ```bash
-# Add to crontab
+# View current cron jobs
+crontab -l
+
+# Add daily execution at 6 AM
 crontab -e
 
-# Run at 6 AM daily
-0 6 * * * cd /path/to/measles-biopulse && python run_all_scrapers.py
+# Add this line:
+0 6 * * * /path/to/measles-biopulse/run_daily_scrapers.sh
 ```
 
-## 📝 License
+Logs are saved to `logs/scraper_YYYYMMDD.log`
 
-MIT License - see [LICENSE](LICENSE) file
+## Testing
 
-## 🙏 Acknowledgments
+Run the complete test suite:
 
-- [Google Trends](https://trends.google.com/)
-- [CDC](https://www.cdc.gov/measles/)
-- [NewsAPI](https://newsapi.org/)
-- [Streamlit](https://streamlit.io/)
+```bash
+# Start services
+docker-compose up -d
 
----
+# Run pipeline
+python run_full_pipeline.py
 
-⭐ **Star this repo if you found it useful!**
+# Verify data
+docker exec biopulse_postgres psql -U postgres -d biopulse -c "
+  SELECT 'Google Trends' as source, COUNT(*) as rows FROM raw_google_trends
+  UNION ALL SELECT 'CDC Cases', COUNT(*) FROM raw_cdc_cases
+  UNION ALL SELECT 'News Articles', COUNT(*) FROM raw_news_articles;
+"
+
+# Check sentiment
+docker exec biopulse_postgres psql -U postgres -d biopulse -c "
+  SELECT sentiment_label, COUNT(*) FROM news_sentiment GROUP BY sentiment_label;
+"
+
+# View risk score
+docker exec biopulse_postgres psql -U postgres -d biopulse -c "
+  SELECT risk_score, risk_level FROM risk_assessment ORDER BY calculated_at DESC LIMIT 1;
+"
+```
+
+## License
+
+MIT License
+
+## Acknowledgments
+
+Data sources:
+- Google Trends API (pytrends)
+- CDC Measles Data
+- NewsAPI
+
+Technologies:
+- Streamlit for dashboarding
+- TextBlob for NLP
+- PostgreSQL for data storage
