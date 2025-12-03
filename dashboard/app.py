@@ -64,10 +64,42 @@ def load_news_articles(_engine):
         return pd.DataFrame()
 
 @st.cache_data(ttl=300)
+def load_sentiment(_engine):
+    """Load news sentiment data"""
+    query = """
+    SELECT n.title, n.published_at, s.sentiment_score, s.sentiment_label, s.subjectivity_score
+    FROM raw_news_articles n
+    JOIN news_sentiment s ON n.id = s.article_id
+    ORDER BY n.published_at DESC
+    """
+    try:
+        df = pd.read_sql(query, _engine)
+        df['published_at'] = pd.to_datetime(df['published_at'])
+        return df
+    except Exception as e:
+        st.warning(f"Sentiment data unavailable: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=300)
+def load_risk_score(_engine):
+    """Load latest risk assessment"""
+    query = """
+    SELECT * FROM risk_assessment 
+    ORDER BY calculated_at DESC 
+    LIMIT 1
+    """
+    try:
+        df = pd.read_sql(query, _engine)
+        return df
+    except Exception as e:
+        st.warning(f"Risk score unavailable: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=300)
 def get_data_stats(_engine):
     """Get row counts for each table"""
     stats = {}
-    tables = ['raw_google_trends', 'raw_cdc_cases', 'raw_news_articles']
+    tables = ['raw_google_trends', 'raw_cdc_cases', 'raw_news_articles', 'news_sentiment', 'risk_assessment']
     
     for table in tables:
         try:
@@ -97,9 +129,16 @@ def main():
     st.sidebar.metric("CDC Cases", f"{stats.get('raw_cdc_cases', 0):,} rows")
     st.sidebar.metric("News Articles", f"{stats.get('raw_news_articles', 0):,} articles")
     
+    if stats.get('news_sentiment', 0) > 0:
+        st.sidebar.metric("Sentiment Analyzed", f"{stats.get('news_sentiment', 0):,} articles")
+    if stats.get('risk_assessment', 0) > 0:
+        st.sidebar.metric("Risk Assessments", f"{stats.get('risk_assessment', 0):,}")
+    
     trends_df = load_google_trends(engine)
     cdc_df = load_cdc_cases(engine)
     news_df = load_news_articles(engine)
+    sentiment_df = load_sentiment(engine)
+    risk_df = load_risk_score(engine)
     
     if trends_df.empty and cdc_df.empty and news_df.empty:
         st.info("📭 **No data available yet.** Please run the scrapers to populate the database.")
@@ -114,7 +153,49 @@ python run_all_scrapers.py
         """, language="bash")
         return
     
-    tab1, tab2, tab3 = st.tabs(["📈 Google Trends", "🏥 CDC Data", "📰 News Articles"])
+    # Risk Assessment Banner (if available)
+    if not risk_df.empty:
+        risk = risk_df.iloc[0]
+        risk_score = risk['risk_score']
+        risk_level = risk['risk_level']
+        
+        # Color based on risk level
+        if risk_level == 'HIGH':
+            risk_color = "#ff4b4b"
+            risk_emoji = "🔴"
+        elif risk_level == 'MEDIUM':
+            risk_color = "#ffa500"
+            risk_emoji = "🟡"
+        else:
+            risk_color = "#00cc00"
+            risk_emoji = "🟢"
+        
+        st.markdown(f"""
+        <div style='background-color: {risk_color}; padding: 20px; border-radius: 10px; margin: 20px 0;'>
+            <h2 style='color: white; text-align: center; margin: 0;'>
+                {risk_emoji} OUTBREAK RISK: {risk_level} ({risk_score:.1f}/100)
+            </h2>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Risk Components
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("📈 Search Interest", f"{risk['search_interest_score']:.1f}/40", 
+                     help="Google Trends search volume")
+        
+        with col2:
+            st.metric("🏥 Case Growth", f"{risk['case_growth_score']:.1f}/30",
+                     help="CDC case count trend")
+        
+        with col3:
+            st.metric("📰 News Sentiment", f"{risk['news_sentiment_score']:.1f}/30",
+                     help="Negativity in news coverage")
+        
+        st.markdown("---")
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 Google Trends", "🏥 CDC Data", "📰 News Articles", "🧠 Sentiment & Risk"])
     
     with tab1:
         if not trends_df.empty:
@@ -241,6 +322,138 @@ python run_all_scrapers.py
                             st.link_button("Read More", article['article_url'])
         else:
             st.info("No news data available. Run `python run_newsapi_scraper.py`")
+    
+    # ========== TAB 4: SENTIMENT & RISK ANALYSIS ==========
+    with tab4:
+        st.subheader("🧠 Sentiment Analysis & Risk Assessment")
+        
+        if not sentiment_df.empty:
+            # Sentiment Summary
+            st.markdown("### 📊 Sentiment Overview")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                total = len(sentiment_df)
+                st.metric("Total Analyzed", total)
+            
+            with col2:
+                positive = len(sentiment_df[sentiment_df['sentiment_label'] == 'positive'])
+                st.metric("Positive", positive, delta=f"{(positive/total*100):.0f}%")
+            
+            with col3:
+                negative = len(sentiment_df[sentiment_df['sentiment_label'] == 'negative'])
+                st.metric("Negative", negative, delta=f"{(negative/total*100):.0f}%", delta_color="inverse")
+            
+            with col4:
+                neutral = len(sentiment_df[sentiment_df['sentiment_label'] == 'neutral'])
+                st.metric("Neutral", neutral, delta=f"{(neutral/total*100):.0f}%")
+            
+            # Sentiment Distribution Pie Chart
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                sentiment_counts = sentiment_df['sentiment_label'].value_counts()
+                fig_pie = px.pie(
+                    values=sentiment_counts.values,
+                    names=sentiment_counts.index,
+                    title="Sentiment Distribution",
+                    color=sentiment_counts.index,
+                    color_discrete_map={'positive': '#00cc00', 'neutral': '#ffa500', 'negative': '#ff4b4b'}
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
+            
+            with col2:
+                # Sentiment over time
+                sentiment_by_date = sentiment_df.groupby(sentiment_df['published_at'].dt.date).agg({
+                    'sentiment_score': 'mean'
+                }).reset_index()
+                
+                fig_timeline = px.line(
+                    sentiment_by_date,
+                    x='published_at',
+                    y='sentiment_score',
+                    title="Average Sentiment Over Time",
+                    markers=True
+                )
+                fig_timeline.add_hline(y=0, line_dash="dash", line_color="gray", annotation_text="Neutral")
+                st.plotly_chart(fig_timeline, use_container_width=True)
+            
+            # Sentiment Score Distribution
+            fig_hist = px.histogram(
+                sentiment_df,
+                x='sentiment_score',
+                nbins=20,
+                title="Sentiment Score Distribution",
+                labels={'sentiment_score': 'Sentiment Score (-1 to 1)'}
+            )
+            st.plotly_chart(fig_hist, use_container_width=True)
+            
+            # Recent Articles with Sentiment
+            st.markdown("### 📰 Recent Articles with Sentiment")
+            display_df = sentiment_df[['title', 'published_at', 'sentiment_label', 'sentiment_score']].head(10)
+            display_df['sentiment_score'] = display_df['sentiment_score'].round(3)
+            
+            # Color code sentiment labels
+            def highlight_sentiment(val):
+                if val == 'positive':
+                    return 'background-color: #d4edda'
+                elif val == 'negative':
+                    return 'background-color: #f8d7da'
+                else:
+                    return 'background-color: #fff3cd'
+            
+            styled_df = display_df.style.applymap(highlight_sentiment, subset=['sentiment_label'])
+            st.dataframe(styled_df, use_container_width=True)
+        
+        else:
+            st.info("No sentiment data available. Run `python sentiment_analysis.py` first.")
+        
+        # Risk Assessment History
+        if not risk_df.empty:
+            st.markdown("---")
+            st.markdown("### 🎯 Latest Risk Assessment")
+            
+            risk = risk_df.iloc[0]
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.metric("🏥 Latest Case Count", f"{risk['latest_case_count']:,}")
+                st.metric("📰 Articles Analyzed", risk['total_articles_analyzed'])
+                st.metric("🕐 Last Updated", pd.to_datetime(risk['calculated_at']).strftime('%Y-%m-%d %H:%M'))
+            
+            with col2:
+                # Risk Components Breakdown
+                components = pd.DataFrame({
+                    'Component': ['Search Interest', 'Case Growth', 'News Sentiment'],
+                    'Score': [risk['search_interest_score'], risk['case_growth_score'], risk['news_sentiment_score']],
+                    'Max': [40, 30, 30]
+                })
+                
+                fig_components = go.Figure()
+                fig_components.add_trace(go.Bar(
+                    x=components['Component'],
+                    y=components['Score'],
+                    name='Current Score',
+                    marker_color=['#1f77b4', '#ff7f0e', '#2ca02c']
+                ))
+                fig_components.add_trace(go.Bar(
+                    x=components['Component'],
+                    y=components['Max'] - components['Score'],
+                    name='Remaining',
+                    marker_color='lightgray'
+                ))
+                fig_components.update_layout(
+                    title="Risk Score Components",
+                    barmode='stack',
+                    yaxis_title="Points",
+                    showlegend=False
+                )
+                st.plotly_chart(fig_components, use_container_width=True)
+        
+        else:
+            st.info("No risk assessment available. Run `python calculate_risk_score.py` first.")
 
 if __name__ == "__main__":
     main()

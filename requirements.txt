@@ -18,3 +18,6 @@ plotly>=5.18.0
 
 # Utilities
 python-dotenv>=1.0.0
+
+# NLP & Sentiment Analysis
+textblob>=0.17.0
